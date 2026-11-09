@@ -9,6 +9,13 @@ import Foundation
 /// seed awaiting its block). The comparison therefore runs only when the
 /// two revisions are equal; otherwise the row is opened and counted as
 /// pending.
+///
+/// The mirror is the typed model's re-encoding of the decrypted row by
+/// the build that last mirrored it, never refreshed by an app update
+/// (SPEC § 6.5). A payload that differs from the mirror only in which
+/// keys are present is therefore a legacy row, counted and noted; a key
+/// whose value differs, or any other differing mirror column, is a
+/// failure.
 enum BlocksReport {
     static let sentinelAudience = "share_ext"
     /// The plaintext `blocks.storage` bit that marks an attachment row
@@ -23,7 +30,7 @@ enum BlocksReport {
     }
 
     struct Tally {
-        var rows = 0, opened = 0, compared = 0, matched = 0, pending = 0, failed = 0
+        var rows = 0, opened = 0, compared = 0, matched = 0, legacy = 0, pending = 0, failed = 0
     }
 
     static func run(session: Session, audience filter: String? = nil) throws -> Report {
@@ -31,7 +38,7 @@ enum BlocksReport {
         var report = Report(title: "veri-popt blocks")
         var total = Tally()
         var perAudience: [String: Tally] = [:]
-        var problems: [String] = []
+        var problems: [String] = [], legacyRows: [String] = []
         var attachments = 0, sentinels = 0, foreign = 0
 
         let rows = try db.query(
@@ -107,6 +114,9 @@ enum BlocksReport {
             let differences = Self.differences(block: block, blocksRow: row, mirror: mirror)
             if differences.isEmpty {
                 total.matched += 1; perAudience[label, default: Tally()].matched += 1
+            } else if differences == ["payload"], Self.keySetOnly(block: block, mirror: mirror) {
+                total.legacy += 1; perAudience[label, default: Tally()].legacy += 1
+                legacyRows.append(id)
             } else {
                 total.failed += 1; perAudience[label, default: Tally()].failed += 1
                 problems.append("\(id): mirror differs in \(differences.joined(separator: ", "))")
@@ -119,13 +129,16 @@ enum BlocksReport {
         let orphans = unmatched.filter { $0.int("revision") != Self.seedRevision }.compactMap { $0.string("id") }
 
         report.section("Totals") { s in
-            s.line("blocks rows: \(total.rows)\(filter.map { " (audience \($0))" } ?? ""); opened: \(total.opened); compared with the mirror: \(total.compared); matching: \(total.matched); pending (not yet mirrored at this revision): \(total.pending); failed: \(total.failed)")
+            s.line("blocks rows: \(total.rows)\(filter.map { " (audience \($0))" } ?? ""); opened: \(total.opened); compared with the mirror: \(total.compared); matching: \(total.matched); legacy key set: \(total.legacy); pending (not yet mirrored at this revision): \(total.pending); failed: \(total.failed)")
             if total.rows == 0 {
                 s.note("no block rows\(filter == nil ? "" : " under that audience")")
             } else if total.failed == 0 {
-                s.ok("every block opened under the documented key, and every one the app had mirrored at this revision decrypts to what the app wrote")
+                s.ok("every block opened under the documented key, and every one the app had mirrored at this revision decrypts to what the app wrote\(total.legacy > 0 ? ", up to the key set of \(total.legacy) legacy row(s)" : "")")
             } else {
                 s.fail("\(total.failed) row(s) failed; listed below")
+            }
+            if total.legacy > 0 {
+                s.note("\(total.legacy) row(s) differ from the mirror only in which keys are present: the mirror is the typed model's re-encoding by the build that last mirrored the row, and an app update never refreshes it (SPEC § 6.5); `blocks-diff` names the keys")
             }
             if total.pending > 0 {
                 s.note("\(total.pending) row(s) are at a revision the app has not mirrored yet; opened but not compared (SPEC § 6.4)")
@@ -144,7 +157,13 @@ enum BlocksReport {
         }
         report.section("By audience") { s in
             for (label, t) in perAudience.sorted(by: { $0.key < $1.key }) {
-                s.line("\(label): \(t.rows) rows, \(t.opened) opened, \(t.matched) matching, \(t.pending) pending, \(t.failed) failed")
+                s.line("\(label): \(t.rows) rows, \(t.opened) opened, \(t.matched) matching, \(t.legacy) legacy, \(t.pending) pending, \(t.failed) failed")
+            }
+        }
+        if !legacyRows.isEmpty {
+            report.section("Legacy key sets") { s in
+                for id in legacyRows.prefix(Self.maxListed) { s.line(id) }
+                if legacyRows.count > Self.maxListed { s.line("… and \(legacyRows.count - Self.maxListed) more") }
             }
         }
         if !problems.isEmpty {
@@ -154,6 +173,14 @@ enum BlocksReport {
             }
         }
         return report
+    }
+
+    /// True when the payload and the mirror's `payload` column differ only
+    /// in which keys are present, every shared key holding the same value.
+    static func keySetOnly(block: DecryptedBlock, mirror: Database.Row) -> Bool {
+        let mirrorPayload = mirror.string("payload").flatMap { try? JSON.parse($0) }
+        let diff = JSONDiff.diff(ciphertext: block.value, mirror: mirrorPayload)
+        return !diff.isEmpty && !diff.contains { $0.kind == .differentValue }
     }
 
     /// The mirror columns the app writes from a decrypted block

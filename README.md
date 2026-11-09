@@ -97,6 +97,7 @@ Decrypts every payload in the `blocks` table and compares it with the correspond
 
 - Opens each `blocks.payload` under the documented key: the personal key, the audience key, or the share-extension key for sentinel rows.
 - Compares the decrypted payload, parent, UI group and audience ledger with the matching `plain_blocks` row, field by field.
+- Counts a payload that differs from the mirror only in which keys are present as a legacy key set and reports it as a note: the mirror is the model's re-encoding by the build that last mirrored the row, and an app update never refreshes it. A key whose value differs stays a failure. `blocks-diff` shows the keys.
 - Counts rows the app has not mirrored at this revision yet as pending, and deep-link seeds separately.
 - Flags orphaned `plain_blocks` rows, and warns about personal rows owned by another account, which the sync stream never serves and no key here could open.
 - Lists every failure and keeps going.
@@ -106,7 +107,7 @@ Decrypts every payload in the `blocks` table and compares it with the correspond
 Shows where a mirror row differs from the ciphertext, for the rows `blocks` reports as "mirror differs" or for one row named with `--id`.
 
 - Decrypts the row and compares its payload with the mirror's key by key, nested objects and arrays included, and names each differing key by its path.
-- Tells keys present on one side only apart from keys whose values differ. The app writes the mirror by decoding the ciphertext into its typed model and encoding that model again, so a row written by an older app version can carry keys the current model drops, or lack keys it now adds, until the row is next edited. Those are notes.
+- Tells keys present on one side only apart from keys whose values differ. The app writes the mirror by decoding the ciphertext into its typed model and encoding that model again, with the build that mirrored the row, and never refreshes it on an app update. So a row can carry keys the current model has retired, or lack keys the model gained after the row was mirrored, until the row is next edited. Those are notes.
 - Warns when a key present on both sides has different values, or when another mirror column differs, since nothing in the app explains that.
 - Names the two sides by their JSON type only, so the report can be shared. `--reveal` prints the values, which are your content.
 

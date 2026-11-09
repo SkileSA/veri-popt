@@ -19,17 +19,17 @@ final class BlocksReportTests: XCTestCase {
     func testCleanDatabaseMatchesEverywhere() throws {
         let r = try report("alice", cases: false)
         XCTAssertFalse(r.hasFailures, r.text())
-        XCTAssertEqual(totals(r), "blocks rows: 6; opened: 6; compared with the mirror: 6; matching: 6; pending (not yet mirrored at this revision): 0; failed: 0")
+        XCTAssertEqual(totals(r), "blocks rows: 6; opened: 6; compared with the mirror: 6; matching: 6; legacy key set: 0; pending (not yet mirrored at this revision): 0; failed: 0")
         XCTAssertTrue(messages(r, .warning).contains("1 personal row(s) belong to another account"), r.text())
         XCTAssertTrue(messages(r, .ok).contains("every block opened under the documented key"))
         XCTAssertTrue(r.sections[0].lines.contains("attachment rows: 1, each carrying a 32-byte file key"))
-        XCTAssertTrue(r.sections[1].lines.contains("personal: 3 rows, 3 opened, 3 matching, 0 pending, 0 failed"), r.text())
+        XCTAssertTrue(r.sections[1].lines.contains("personal: 3 rows, 3 opened, 3 matching, 0 legacy, 0 pending, 0 failed"), r.text())
     }
 
     func testEveryMirrorStateIsTold() throws {
         let r = try report("alice", cases: true)
         XCTAssertTrue(r.hasFailures)
-        XCTAssertEqual(totals(r), "blocks rows: 11; opened: 10; compared with the mirror: 7; matching: 6; pending (not yet mirrored at this revision): 3; failed: 2", r.text())
+        XCTAssertEqual(totals(r), "blocks rows: 11; opened: 10; compared with the mirror: 7; matching: 6; legacy key set: 0; pending (not yet mirrored at this revision): 3; failed: 2", r.text())
         XCTAssertTrue(messages(r, .note).contains("3 row(s) are at a revision the app has not mirrored yet"))
         XCTAssertTrue(messages(r, .note).contains("1 mirror row(s) at revision -1 are deep-link seeds"))
         XCTAssertTrue(messages(r, .warning).contains("1 mirror row(s) have no blocks row") && messages(r, .warning).contains("case-orphan"))
@@ -37,6 +37,48 @@ final class BlocksReportTests: XCTestCase {
         XCTAssertTrue(problems(r).contains("case-tampered: does not open under the personal key"))
         XCTAssertTrue(problems(r).contains("case-edited: mirror differs in payload"))
         XCTAssertFalse(problems(r).contains("case-stale"))
+    }
+
+    func testLegacyKeySetIsANoteNotAFailure() throws {
+        let test = try SessionTests.fixture()
+        let alice = Vectors.object("vaults", "alice", "expected")
+        let personal = Derivation.subkeys(masterDEK: Vectors.key(alice, "masterDEK")).personalBlocksKey
+        // A retired key still in the ciphertext, dropped by the model that mirrored the row.
+        let dropped = Data(#"{"payload":{"type":1,"value":{"name":"n","projectId":{"value":"p","updatedAt":1}}}}"#.utf8)
+        try test.insertMirroredBlock(id: "case-dropped", owner: "alice-uid", audience: nil,
+                                     payload: try Envelope(sealing: dropped, with: personal).json(), key: personal)
+        test.exec("UPDATE plain_blocks SET payload = '{\"name\":\"n\"}' WHERE id = 'case-dropped';")
+        // A key the mirroring build did not know, nested inside an object.
+        let newer = Data(#"{"payload":{"type":5,"value":{"address":{"city":"c","fullAddress":"f"}}}}"#.utf8)
+        try test.insertMirroredBlock(id: "case-newer", owner: "alice-uid", audience: nil,
+                                     payload: try Envelope(sealing: newer, with: personal).json(), key: personal)
+        test.exec("UPDATE plain_blocks SET payload = '{\"address\":{\"city\":\"c\"}}' WHERE id = 'case-newer';")
+        // A shared key with another value stays a failure.
+        try test.insertMirroredBlock(id: "case-value", owner: "alice-uid", audience: nil,
+                                     payload: try Envelope(sealing: newer, with: personal).json(), key: personal)
+        test.exec("UPDATE plain_blocks SET payload = '{\"address\":{\"city\":\"other\"}}' WHERE id = 'case-value';")
+        test.close()
+        let r = try BlocksReport.run(session: try SessionTests.session("alice", db: try Database(path: test.path)))
+        XCTAssertTrue(r.hasFailures, r.text())
+        XCTAssertEqual(totals(r), "blocks rows: 7; opened: 7; compared with the mirror: 7; matching: 4; legacy key set: 2; pending (not yet mirrored at this revision): 0; failed: 1", r.text())
+        XCTAssertTrue(messages(r, .note).contains("2 row(s) differ from the mirror only in which keys are present"), r.text())
+        XCTAssertEqual(r.sections.first { $0.title == "Legacy key sets" }?.lines, ["case-dropped", "case-newer"])
+        XCTAssertEqual(problems(r), "case-value: mirror differs in payload")
+        XCTAssertTrue(r.sections[1].lines.contains { $0.hasPrefix("personal:") && $0.hasSuffix("2 legacy, 0 pending, 1 failed") }, r.text())
+    }
+
+    func testLegacyRowsAloneStillPass() throws {
+        let test = try SessionTests.fixture()
+        let alice = Vectors.object("vaults", "alice", "expected")
+        let personal = Derivation.subkeys(masterDEK: Vectors.key(alice, "masterDEK")).personalBlocksKey
+        let dropped = Data(#"{"payload":{"type":1,"value":{"name":"n","projectId":"p"}}}"#.utf8)
+        try test.insertMirroredBlock(id: "case-dropped", owner: "alice-uid", audience: nil,
+                                     payload: try Envelope(sealing: dropped, with: personal).json(), key: personal)
+        test.exec("UPDATE plain_blocks SET payload = '{\"name\":\"n\"}' WHERE id = 'case-dropped';")
+        test.close()
+        let r = try BlocksReport.run(session: try SessionTests.session("alice", db: try Database(path: test.path)))
+        XCTAssertFalse(r.hasFailures, r.text())
+        XCTAssertTrue(messages(r, .ok).contains("up to the key set of 1 legacy row(s)"), r.text())
     }
 
     func testAudienceFilter() throws {

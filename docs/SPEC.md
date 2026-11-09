@@ -304,6 +304,29 @@ JSON is compared as parsed values, never as bytes. Only the envelope
 mirror's `payload` column, come from the default encoder, which does not
 sort, so two encodings of one value can differ in key order.
 
+**What the mirror is.** The app does not copy the decrypted bytes into
+the mirror. It decodes them into its typed payload model and encodes
+that model again (`PlainBlocksRow.fromSyncedBlock`). The mirror is
+therefore the model's view of the row as held by the build that last
+mirrored it. A row is mirrored again only when its `revision` changes;
+an app update never refreshes a mirror. Two consequences follow, and
+the tool treats them differently:
+
+- The key sets may differ. A key the current model has retired stays in
+  the ciphertext and is absent from the mirror; a key added to the model
+  after a row was mirrored is in the ciphertext (written by a newer
+  build) and absent from the mirror (written by an older one). Either
+  way every key present on both sides holds the same value. `blocks`
+  counts such rows as *legacy key set* and reports them as a note;
+  `blocks-diff` names the keys.
+- A key present on both sides with different values, or any other
+  mirror column that differs, has no explanation in the app and is a
+  failure.
+
+A retired key is not deleted by being dropped from the model: it stays
+inside the ciphertext, under the row's key, until the row is next
+edited and re-encrypted.
+
 Attachment rows carry, inside `payload.value`, an `attachmentRef` whose
 `fileDEK` field is the base64 32-byte key of the file (§ 7). The file key
 is therefore protected by whatever key protects the block.
