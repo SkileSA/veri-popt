@@ -101,6 +101,15 @@ Decrypts every payload in the `blocks` table and compares it with the correspond
 - Flags orphaned `plain_blocks` rows, and warns about personal rows owned by another account, which the sync stream never serves and no key here could open.
 - Lists every failure and keeps going.
 
+#### `blocks-diff`
+
+Shows where a mirror row differs from the ciphertext, for the rows `blocks` reports as "mirror differs" or for one row named with `--id`.
+
+- Decrypts the row and compares its payload with the mirror's key by key, nested objects and arrays included, and names each differing key by its path.
+- Tells keys present on one side only apart from keys whose values differ. The app writes the mirror by decoding the ciphertext into its typed model and encoding that model again, so a row written by an older app version can carry keys the current model drops, or lack keys it now adds, until the row is next edited. Those are notes.
+- Warns when a key present on both sides has different values, or when another mirror column differs, since nothing in the app explains that.
+- Names the two sides by their JSON type only, so the report can be shared. `--reveal` prints the values, which are your content.
+
 #### `file`
 
 Fetches attachments from the attachment bucket (Cloudflare R2) and opens them. The only command that uses the network.

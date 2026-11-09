@@ -12,6 +12,7 @@ commands:
   derive      derive every key from your recovery code and locked keys
   keys        every audience and keys row, opened with the account's keys
   blocks      every block opened and compared with the app's own decryption
+  blocks-diff where a mirror row differs from the ciphertext, key by key
   file        attachment objects fetched from the bucket and opened (network)
   vault-list  every secret vault slot, from the recovery code alone
   vault       a vault opened with its passphrase, every block in it checked
@@ -35,6 +36,8 @@ do {
         status = args.flag("help") ? { print(KeysCommand.usage); return 0 }() : KeysCommand.run(args)
     case "blocks":
         status = args.flag("help") ? { print(BlocksCommand.usage); return 0 }() : BlocksCommand.run(args)
+    case "blocks-diff":
+        status = args.flag("help") ? { print(BlocksDiffCommand.usage); return 0 }() : BlocksDiffCommand.run(args)
     case "file":
         status = args.flag("help") ? { print(FileCommand.usage); return 0 }() : FileCommand.run(args)
     case "vault-list":
