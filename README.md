@@ -1,16 +1,16 @@
-# VeriPopt
+# veri-popt
 `veri-popt` is a macOS CLI which aims to document our end-to-end encryption design and facilitate verifying it against real data from **Popt**.
 
 ## The Popt app
 [Popt](https://popt.com) is an iOS personal productivity app developed and published by Skile SA, rue de Riant-Coteau 7, 1196 Gland, Switzerland.
 
 - **Bundle ID:** `ch.skile.popt-it`
-- **Platforms:** iOS, iPadOS, macOS (designed for iPad) 
-- **Minimum OS version:** 26.2 and above
+- **Platforms:** iOS, iPadOS, macOS (Designed for iPad)
+- **Minimum OS version:** 26.2
 
 ### Data model summary
-Our data architecture is local first, with an authoritative server.
-- SQLite database on the device contains encrypted blocks and a plain-text mirror. The database folder is excluded from both iCloud and local iOS backup.
+Our data architecture is local-first, with an authoritative server.
+- SQLite database on the device contains encrypted blocks and a plaintext mirror. The database folder is excluded from both iCloud and local iOS backup.
 - Postgres authoritative store, encrypted blocks only
 - Replication of user-scoped rows to their signed-in devices with [PowerSync](https://powersync.com)
 - Upload through our own endpoint, client-side conflict resolution at upload time
@@ -18,19 +18,19 @@ Our data architecture is local first, with an authoritative server.
 The core tables for user content and sharing are the following:
 
 #### `blocks` table
-All content is modeled as blocks structured in trees. The actual content is stored in the encrypted `payload` column. Metadata necessary for replicating the appropriate rows to users, detecting conflicts server-side, managing attachments, and validating uploaded rows are stored in plain-text columns.
+All content is modeled as blocks structured in trees. The actual content is stored in the encrypted `payload` column. Metadata necessary for replicating the appropriate rows to users, detecting conflicts server-side, managing attachments, and validating uploaded rows is stored in plaintext columns.
 
 The `audience_id` column is used for shared blocks, and is `null` for personal blocks. PowerSync syncs down all personal blocks the user owns, and all blocks associated with an audience they are a member of.
 
-On sync-down of new or updated blocks, Popt decryptes block payloads into the local-only `plain_blocks` table. That table is never synced, it is a purely local cache. The `veri-popt` CLI verifies encryption by decrypting block payloads and comparing against the corresponding rows in the `plain_blocks` table.
+On sync-down of new or updated blocks, Popt decrypts block payloads into the local-only `plain_blocks` table. That table is never synced; it is a purely local cache. The `veri-popt` CLI verifies encryption by decrypting block payloads and comparing against the corresponding rows in the `plain_blocks` table.
 
 #### `keys` table
 Shared content is encrypted per audience, an audience being defined as an owner and a set of peers. Therefore, Alice and Bob can constitute two distinct audiences: Alice as owner, Bob as peer; Bob as owner, Alice as peer. The owner mints an audience's key, and wraps it for each peer with the unique ECDH secret they share with them, and for themselves with a separate owner-wrap key.
 
-PowerSync syncs down key grants by `peer_id`. The delivery of a key to the wrong owner is harmless: the key simply fails to unwrap.
+PowerSync syncs down key grants by `peer_id`. The delivery of a key to the wrong user is harmless: the key simply fails to unwrap.
 
 #### `user_profiles` table
-This table holds a user's screen name, status text, avatar image data, and public key. The entire table is in plain text, which the app discloses in the profile editing screen. We decided against encrypting user profiles so that friends of friends can be displayed in group chats, and to enable user discovery in the future. For now, there is no searchable directory and users only connect via direct invite links. If we do add a directory, it will be strictly opt-in.
+This table holds a user's screen name, status text, avatar image data, and public key. The entire table is in plaintext, which the app discloses in the profile editing screen. We decided against encrypting user profiles so that friends of friends can be displayed in group chats, and to enable user discovery in the future. For now, there is no searchable directory and users only connect via direct invite links. If we do add a directory, it will be strictly opt-in.
 
 PowerSync syncs down the self profile, profiles with which we have a connection, and profiles of peers of audiences we are a member of.
 
@@ -41,16 +41,16 @@ PowerSync syncs down all `user_connections` rows where the user is the initiator
 
 ## The `veri-popt` tool
 
-The CLI inspects real SQLite databases produced by Popt. It does not require full disk access, but asks you to provide a path to a non-sandboxed folder in which you place a copy of the Popt database to verify, along with encrypted keys which you export directly from Popt. You provide your recovery code in a hidden prompt or as a file path, and `veri-popt` unwraps the keys, performs the required key derivations, and verifies that the data matches our cryptographic spec.
+The CLI inspects real SQLite databases produced by Popt. It does not require Full Disk Access, but asks you to provide a path to a non-sandboxed folder in which you place a copy of the Popt database to verify, along with encrypted keys which you export directly from Popt. You provide your recovery code in a hidden prompt or as a file path, and `veri-popt` unwraps the keys, performs the required key derivations, and verifies that the data matches our cryptographic spec.
 
-Because Popt's binary can run on Apple Silicon macs, the most convenient way to extract a database is to install Popt from the App Store on a Mac, and copy the database from the app's sandbox. Extracting from an iOS device is much less practical since the database is excluded from backups.
+Because Popt's binary can run on Apple silicon Macs, the most convenient way to extract a database is to install Popt from the App Store on a Mac, and copy the database from the app's sandbox. Extracting from an iOS device is much less practical since the database is excluded from backups.
 
-To get started with the CLI, follow the instructions in [docs/VERIFYING.md](docs/VERIFYING.md)
+Building the tool needs Xcode 27.2 or later on macOS 26.2 or later. To get started with the CLI, follow the instructions in [docs/VERIFYING.md](docs/VERIFYING.md).
 
-Learn more about our cryptographic specifications in [docs/SPEC.md](docs/SPEC.md)
+Learn more about our cryptographic specifications in [docs/SPEC.md](docs/SPEC.md).
 
 ### Commands and what they verify
-Every command except `find-db` takes as single positional argument the path to a non-sanboxed folder containing the following: 
+Every command except `find-db` takes as its single positional argument the path to a non-sandboxed folder containing the following:
 
 - `powersync-popt-it.sqlite` and its `-wal` file, copied from the app's sandbox
 - `popt-locked-keys.json`, exported from the app in **My Account ▸ Security ▸ Export Locked Keys**
@@ -98,12 +98,12 @@ Decrypts every payload in the `blocks` table and compares it with the correspond
 - Opens each `blocks.payload` under the documented key: the personal key, the audience key, or the share-extension key for sentinel rows.
 - Compares the decrypted payload, parent, UI group and audience ledger with the matching `plain_blocks` row, field by field.
 - Counts rows the app has not mirrored at this revision yet as pending, and deep-link seeds separately.
-- Flags orphaned `plain_blocks` rows,  and warns about personal rows owned by another account, which the sync stream never serves and no key here could open.
+- Flags orphaned `plain_blocks` rows, and warns about personal rows owned by another account, which the sync stream never serves and no key here could open.
 - Lists every failure and keeps going.
 
 #### `file`
 
-Fetches attachments from the R2 bucket and opens them. The only command that uses the network.
+Fetches attachments from the attachment bucket (Cloudflare R2) and opens them. The only command that uses the network.
 
 - Fetches each object with a plain GET, as the app does, grouping rows that point at the same object.
 - Checks that the served bytes are ciphertext: not text, not a known file signature, and the right length for nonce plus ciphertext plus tag.
@@ -136,23 +136,17 @@ Opens one vault with its passphrase and checks everything inside it.
 `veri-popt` is still a work in progress. The following need to be documented and verified:
 
 - the Keychain flow (what is cached on device, synced in iCloud Keychain, the extension boundary)
-- the Share Extension transit key (`shareExtensionKey`): a block it wrote
-  is re-encrypted under the personal key as soon as the app runs, so a
-  database copy never holds one; checking it needs its own flow
+- the Share Extension transit key (`shareExtensionKey`): a block it wrote is re-encrypted under the personal key as soon as the app runs, so a database copy never holds one; checking it needs its own flow
 - recovery code rotation and the `rotateVault` signature
-- inside a vault: the quick-unlock Keychain item and the encrypted
-  thumbnail store (the config block, the passphrase path, the per-row
-  keys and the vault database are checked, § 8)
-- how a key pin comes to exist: the two verified moments, the
-  acceptance tags, the verification pass (the pins block itself is already checked)
+- inside a vault: the quick-unlock Keychain item and the encrypted thumbnail store (the config block, the passphrase path, the per-row keys and the vault database are checked, SPEC § 8)
+- how a key pin comes to exist: the two verified moments, the acceptance tags, the verification pass (the pins block itself is already checked)
 - live traffic between client and server
 - invite links and the App Clip
 - push payloads and the notification extension
 - abuse reports and the server public keys they encrypt to
 
-
 ### Limits of the approach
-The tool checks the data the app produces, not the app’s code. We considered publishing our crypto module as a signed dynamic library that could verifiably be linked into Popt’s binary, but that would add little guarantee: the app could bypass it entirely. Short of open-sourcing the entire app, offering tools to audit what the app produces is a reasonable compromise.
+The tool checks the data the app produces, not the app's code. We considered publishing our crypto module as a signed dynamic library that could verifiably be linked into Popt's binary, but that would add little guarantee: the app could bypass it entirely. Short of open-sourcing the entire app, offering tools to audit what the app produces is a reasonable compromise.
 
 ## Repo layout
 

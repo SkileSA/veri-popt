@@ -5,11 +5,12 @@ re-implements and checks. It is written to stand on its own: an auditor
 should be able to read this file, read the tool's sources, and judge
 whether the tool actually tests what the Popt app claims, without reading
 the app's code. Every constant below was read from the app's sources
-(see § Provenance). Where the tool and this file disagree, this file is
+(see § 9). Where the tool and this file disagree, this file is
 wrong or the tool is wrong, never the app by definition; file an issue.
 
-Scope of this version: key derivation, block encryption, file encryption.
-What is deliberately out of scope is listed in § Not covered.
+Scope of this version: key derivation, block encryption, file encryption,
+the key-pins block and secret vaults. What is not covered yet is listed
+in the README, § Not covered yet.
 
 ## 1. Conventions
 
@@ -43,7 +44,7 @@ base64 string fields, keys sorted, no whitespace:
 `nonce` decodes to 12 bytes, `tag` to 16 bytes. Readers accept the fields
 in any order and ignore unknown sibling fields. One sibling field is
 defined: `"peer"`, a user id, present only on peer-wrapped audience keys
-(§ 6.2).
+(§ 6.3).
 
 ### 2.2 Combined blob
 
@@ -115,7 +116,7 @@ of the code; there is no separate check value, by design.
 The KEK is random (32 bytes, generated at sign-up), not derived from any
 user secret. Its only job is to wrap the three keys above. The recovery
 KEK wraps the KEK so the code can be rotated without re-wrapping anything
-else (rotation is out of scope here, § 10).
+else (rotation is not covered yet, README § Not covered yet).
 
 Checks the tool performs after unwrapping:
 
@@ -215,7 +216,7 @@ To read audience `aid`, a user with id `me` takes the row where
 - **Peer row** (`"peer": ownerId` present):
 
 ```
-shared   = X25519(curvePriv(me), curvePub(ownerId))           // from user_profiles.public_key
+shared   = X25519(curvePriv(me), curvePub(ownerId))           // the pinned key, § 6.4
 wrapKey  = HKDF(ikm = shared, salt = "popt-it-dek-share", info = "dek-wrap")
 DEK      = open(wrapped_dek, wrapKey)
 ```
@@ -258,14 +259,14 @@ An entry the reader cannot parse counts as unpinned. A key is written
 once per user and never changed in place; the `unfriended` flag is the
 one field that flips.
 
-What the tool checks: the block exists at its id and opens; the tenant
-echo is right; the self entry equals the derived Curve25519 public key;
+What the tool checks: the block exists at its id and opens; its `type`
+and `scope` fields echo `key_pins` and `user`; the self entry equals the derived Curve25519 public key;
 every ECDH above used the pinned key; and, as a cross-check only, the
 key the server publishes for each pinned peer equals the pinned one. A
 divergence there is the substitution the pins defend against, and is
 reported as a failure. How a pin comes to exist (the two verified
 moments, the acceptance tags, the verification pass) is not checked
-(§ 10).
+(README § Not covered yet).
 
 ### 6.5 The decrypted payload
 
@@ -401,3 +402,13 @@ stay inside the vault; the main mirror keeps the inner layer sealed;
 rows exist at ids derived from the vault DEK; and, when
 `popt-vault.sqlite` was copied while the vault was unlocked, the inner
 decryptions equal that mirror.
+
+## 9. Provenance
+
+Every constant, id rule and format in this file was read from the Popt
+iOS app's sources, `popt-it-ios` version 1.0.0, on Nov 3 2026. The
+known-answer vectors in `Tests/Fixtures/vectors.json` were produced on
+the same day by throwaway tests run once against that version's own
+crypto code, then deleted; the fixture's `generatedBy` header records
+which types produced each section. A later app version may change any
+of this; when the tool and the app disagree, check this version first.
